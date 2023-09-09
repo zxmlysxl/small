@@ -23,8 +23,8 @@ uci:revert(appname)
 
 local has_ss = api.is_finded("ss-redir")
 local has_ss_rust = api.is_finded("sslocal")
-local has_v2ray = api.is_finded("v2ray")
-local has_xray = api.is_finded("xray")
+local has_singbox = api.finded_com("singbox")
+local has_xray = api.finded_com("xray")
 local allowInsecure_default = true
 local ss_aead_type_default = uci:get(appname, "@global_subscribe[0]", "ss_aead_type") or "shadowsocks-libev"
 -- 判断是否过滤节点关键字
@@ -121,6 +121,9 @@ do
 				set = function(o, server)
 					uci:set(appname, t[".name"], option, server)
 					o.newNodeId = server
+				end,
+				delete = function(o)
+					uci:delete(appname, t[".name"])
 				end
 			}
 		end)
@@ -140,6 +143,9 @@ do
 				set = function(o, server)
 					uci:set(appname, t[".name"], option, server)
 					o.newNodeId = server
+				end,
+				delete = function(o)
+					uci:delete(appname, t[".name"])
 				end
 			}
 		end)
@@ -228,15 +234,20 @@ do
 
 			for k, e in pairs(rules) do
 				local _node_id = node[e[".name"]] or nil
-				CONFIG[#CONFIG + 1] = {
-					log = false,
-					currentNode = _node_id and uci:get_all(appname, _node_id) or nil,
-					remarks = "分流" .. e.remarks .. "节点",
-					set = function(o, server)
-						uci:set(appname, node_id, e[".name"], server)
-						o.newNodeId = server
-					end
-				}
+				if _node_id and api.parseURL(_node_id) then
+				else
+					CONFIG[#CONFIG + 1] = {
+						log = false,
+						currentNode = _node_id and uci:get_all(appname, _node_id) or nil,
+						remarks = "分流" .. e.remarks .. "节点",
+						set = function(o, server)
+							if not server then server = "nil" end
+							uci:set(appname, node_id, e[".name"], server)
+							o.newNodeId = server
+						end
+					}
+				end
+				
 			end
 		elseif node.protocol and node.protocol == '_balancing' then
 			local node_id = node[".name"]
@@ -289,6 +300,9 @@ do
 			end
 		else
 			if v.currentNode == nil then
+				if v.delete then
+					v.delete()
+				end
 				CONFIG[k] = nil
 			end
 		end
@@ -373,9 +387,11 @@ local function processData(szType, content, add_mode, add_from)
 		result.remarks = base64Decode(params.remarks)
 	elseif szType == 'vmess' then
 		local info = jsonParse(content)
-		result.type = 'V2ray'
 		if has_xray then
 			result.type = 'Xray'
+		end
+		if has_singbox then
+			result.type = 'sing-box'
 		end
 		result.address = info.add
 		result.port = info.port
@@ -518,13 +534,9 @@ local function processData(szType, content, add_mode, add_from)
 					if method:lower() == "chacha20-poly1305" then
 						result.method = "chacha20-ietf-poly1305"
 					end
-				elseif ss_aead_type_default == "v2ray" and has_v2ray and not result.plugin then
-					result.type = 'V2ray'
+				elseif ss_aead_type_default == "sing-box" and has_singbox and not result.plugin then
+					result.type = 'sing-box'
 					result.protocol = 'shadowsocks'
-					result.transport = 'tcp'
-					if method:lower() == "chacha20-ietf-poly1305" then
-						result.method = "chacha20-poly1305"
-					end
 				elseif ss_aead_type_default == "xray" and has_xray and not result.plugin then
 					result.type = 'Xray'
 					result.protocol = 'shadowsocks'
@@ -543,9 +555,11 @@ local function processData(szType, content, add_mode, add_from)
 			content = content:sub(0, idx_sp - 1)
 		end
 		result.remarks = UrlDecode(alias)
-		result.type = 'V2ray'
 		if has_xray then
 			result.type = 'Xray'
+		end
+		if has_singbox then
+			result.type = 'sing-box'
 		end
 		result.protocol = 'trojan'
 		if content:find("@") then
@@ -608,9 +622,11 @@ local function processData(szType, content, add_mode, add_from)
 		result.group = content.airport
 		result.remarks = content.remarks
 	elseif szType == "vless" then
-		result.type = 'V2ray'
 		if has_xray then
 			result.type = 'Xray'
+		end
+		if has_singbox then
+			result.type = 'sing-box'
 		end
 		result.protocol = "vless"
 		local alias = ""
@@ -685,10 +701,11 @@ local function processData(szType, content, add_mode, add_from)
 			
 			result.encryption = params.encryption or "none"
 
+			result.flow = params.flow or nil
+
 			result.tls = "0"
 			if params.security == "tls" or params.security == "reality" then
 				result.tls = "1"
-				result.tlsflow = params.flow or nil
 				result.tls_serverName = (params.sni and params.sni ~= "") and params.sni or params.host
 				result.fingerprint = (params.fp and params.fp ~= "") and params.fp or "chrome"
 				if params.security == "reality" then
@@ -781,7 +798,7 @@ local function truncate_nodes(add_from)
 			end
 			config.set(config)
 		else
-			if config.currentNode.add_mode == "2" then
+			if config.currentNode and config.currentNode.add_mode == "2" then
 				if add_from then
 					if config.currentNode.add_from and config.currentNode.add_from == add_from then
 						config.set(config, "nil")
@@ -810,23 +827,13 @@ local function truncate_nodes(add_from)
 end
 
 local function select_node(nodes, config)
-	local server
 	if config.currentNode then
-		-- 特别优先级 分流 + 备注
-		if config.currentNode.protocol and config.currentNode.protocol == '_shunt' then
+		local server
+		-- 特别优先级 cfgid
+		if config.currentNode[".name"] then
 			for index, node in pairs(nodes) do
-				if node.remarks == config.currentNode.remarks then
-					log('更新【' .. config.remarks .. '】分流匹配节点：' .. node.remarks)
-					server = node[".name"]
-					break
-				end
-			end
-		end
-		-- 特别优先级 负载均衡 + 备注
-		if config.currentNode.protocol and config.currentNode.protocol == '_balancing' then
-			for index, node in pairs(nodes) do
-				if node.remarks == config.currentNode.remarks then
-					log('更新【' .. config.remarks .. '】负载均衡匹配节点：' .. node.remarks)
+				if node[".name"] == config.currentNode[".name"] then
+					log('更新【' .. config.remarks .. '】匹配节点：' .. node.remarks)
 					server = node[".name"]
 					break
 				end
@@ -912,24 +919,26 @@ local function select_node(nodes, config)
 				end
 			end
 		end
-	end
-	-- 还不行 随便找一个
-	if not server then
-		local nodes_table = {}
-		for k, e in ipairs(api.get_valid_nodes()) do
-			if e.node_type == "normal" then
-				nodes_table[#nodes_table + 1] = e
+		-- 还不行 随便找一个
+		if not server then
+			local nodes_table = {}
+			for k, e in ipairs(api.get_valid_nodes()) do
+				if e.node_type == "normal" then
+					nodes_table[#nodes_table + 1] = e
+				end
+			end
+			if #nodes_table > 0 then
+				if config.log == nil or config.log == true then
+					log('【' .. config.remarks .. '】' .. '无法找到最匹配的节点，当前已更换为：' .. nodes_table[1].remarks)
+				end
+				server = nodes_table[1][".name"]
 			end
 		end
-		if #nodes_table > 0 then
-			if config.log == nil or config.log == true then
-				log('【' .. config.remarks .. '】' .. '无法找到最匹配的节点，当前已更换为：' .. nodes_table[1].remarks)
-			end
-			server = nodes_table[1][".name"]
+		if server then
+			config.set(config, server)
 		end
-	end
-	if server then
-		config.set(config, server)
+	else
+		config.set(config, "nil")
 	end
 end
 

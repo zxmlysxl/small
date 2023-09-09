@@ -1,33 +1,33 @@
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# Copyright (C) 2021-2022 ImmortalWrt.org
+# Copyright (C) 2021-2023 ImmortalWrt.org
 
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=v2ray-geodata
-PKG_RELEASE:=$(AUTORELEASE)
+PKG_RELEASE:=2
 
 PKG_LICENSE_FILES:=LICENSE
 PKG_MAINTAINER:=Tianling Shen <cnsztl@immortalwrt.org>
 
 include $(INCLUDE_DIR)/package.mk
 
-GEOIP_VER:=202308240036
+GEOIP_VER:=202309080643
 GEOIP_FILE:=geoip.dat.$(GEOIP_VER)
 define Download/geoip
   URL:=https://github.com/v2fly/geoip/releases/download/$(GEOIP_VER)/
   URL_FILE:=geoip.dat
   FILE:=$(GEOIP_FILE)
-  HASH:=1982be239f54a97d26803bd8892365cb27af27a63256e85293f159f77ef49273
+  HASH:=8629a9ee8c5bf7b9eb85393841b88050cfbf44d291f1ef8760195173964e8b73
 endef
 
-GEOSITE_VER:=20230825070717
+GEOSITE_VER:=20230905081311
 GEOSITE_FILE:=dlc.dat.$(GEOSITE_VER)
 define Download/geosite
   URL:=https://github.com/v2fly/domain-list-community/releases/download/$(GEOSITE_VER)/
   URL_FILE:=dlc.dat
   FILE:=$(GEOSITE_FILE)
-  HASH:=231a6fb4915f7652ad9b2027965fbbb27435ffa9b3a0734ad2b69693e95d6604
+  HASH:=d393deda756a446ec5247730ef09fed80ba9fb8d9204d1263c45a3604435fe57
 endef
 
 define Package/v2ray-geodata/template
@@ -52,16 +52,6 @@ define Package/v2ray-geosite
   LICENSE:=MIT
 endef
 
-define Build/Prepare
-	$(call Build/Prepare/Default)
-ifneq ($(CONFIG_PACKAGE_v2ray-geoip),)
-	$(call Download,geoip)
-endif
-ifneq ($(CONFIG_PACKAGE_v2ray-geosite),)
-	$(call Download,geosite)
-endif
-endef
-
 define Build/Compile
 endef
 
@@ -75,5 +65,7 @@ define Package/v2ray-geosite/install
 	$(INSTALL_DATA) $(DL_DIR)/$(GEOSITE_FILE) $(1)/usr/share/v2ray/geosite.dat
 endef
 
+$(eval $(call Download,geoip))
+$(eval $(call Download,geosite))
 $(eval $(call BuildPackage,v2ray-geoip))
 $(eval $(call BuildPackage,v2ray-geosite))
