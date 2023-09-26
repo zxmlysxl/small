@@ -396,6 +396,7 @@ local function processData(szType, content, add_mode, add_from)
 		result.address = info.add
 		result.port = info.port
 		result.protocol = 'vmess'
+		result.alter_id = info.aid
 		result.uuid = info.id
 		result.remarks = info.ps
 		-- result.mux = 1
@@ -622,11 +623,11 @@ local function processData(szType, content, add_mode, add_from)
 		result.group = content.airport
 		result.remarks = content.remarks
 	elseif szType == "vless" then
-		if has_xray then
-			result.type = 'Xray'
-		end
 		if has_singbox then
 			result.type = 'sing-box'
+		end
+		if has_xray then
+			result.type = 'Xray'
 		end
 		result.protocol = "vless"
 		local alias = ""
