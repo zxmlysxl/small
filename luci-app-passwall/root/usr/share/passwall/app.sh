@@ -433,14 +433,6 @@ run_xray() {
 	[ -n "$dns_query_strategy" ] && _extra_param="${_extra_param} -dns_query_strategy ${dns_query_strategy}"
 	[ -n "$dns_client_ip" ] && _extra_param="${_extra_param} -dns_client_ip ${dns_client_ip}"
 	[ -n "$dns_cache" ] && _extra_param="${_extra_param} -dns_cache ${dns_cache}"
-	local sniffing=$(config_t_get global_forwarding sniffing 1)
-	[ "${sniffing}" = "1" ] && {
-		_extra_param="${_extra_param} -sniffing 1"
-		local route_only=$(config_t_get global_forwarding route_only 0)
-		[ "${route_only}" = "1" ] && _extra_param="${_extra_param} -route_only 1"
-	}
-	local buffer_size=$(config_t_get global_forwarding buffer_size)
-	[ -n "${buffer_size}" ] && _extra_param="${_extra_param} -buffer_size ${buffer_size}"
 	[ -n "${remote_dns_tcp_server}" ] && {
 		local _dns=$(get_first_dns remote_dns_tcp_server 53 | sed 's/#/:/g')
 		local _dns_address=$(echo ${_dns} | awk -F ':' '{print $1}')
@@ -493,7 +485,7 @@ run_chinadns_ng() {
 
 	echolog "  | - (chinadns-ng) 最高支持4级域名过滤..."
 
-	local _default_tag
+	local _default_tag=$(config_t_get global chinadns_ng_default_tag smart)
 	local _extra_param=""
 	[ -n "$_chnlist" ] && {
 		[ -s "${RULES_PATH}/chnlist" ] && {
@@ -518,7 +510,7 @@ run_chinadns_ng() {
 		#当只有使用gfwlist模式时设置默认DNS为本地直连
 		[ -n "$_gfwlist" ] && [ -z "$_chnlist" ] && _default_tag="chn"
 	}
-	[ -n "$_default_tag" ] && _extra_param="${_extra_param} -d ${_default_tag}"
+	[ -n "$_default_tag" ] && [ "$_default_tag" != "smart" ] && _extra_param="${_extra_param} -d ${_default_tag}"
 
 	_log_path="/dev/null"
 	ln_run "$(first_type chinadns-ng)" chinadns-ng "$_log_path" -v -b 127.0.0.1 -l "${_listen_port}" ${_dns_china:+-c "${_dns_china}"} ${_dns_trust:+-t "${_dns_trust}"} ${_extra_param} -f ${_no_ipv6_rules:+-N=${_no_ipv6_rules}}
