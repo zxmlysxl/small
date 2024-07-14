@@ -5,18 +5,24 @@ config global
 	option tcp_node 'nil'
 	option udp_node 'nil'
 	option tcp_node_socks_port '1070'
-	option dns_mode 'dns2tcp'
+	option filter_proxy_ipv6 '1'
+	option dns_shunt 'chinadns-ng'
+	option dns_mode 'tcp'
 	option remote_dns '1.1.1.1'
-	option filter_proxy_ipv6 '0'
-	option when_chnroute_default_dns 'direct'
-	option tcp_proxy_mode 'chnroute'
-	option udp_proxy_mode 'chnroute'
-	option chinadns_ng_default_tag 'smart'
-	option localhost_tcp_proxy_mode 'default'
-	option localhost_udp_proxy_mode 'default'
+	option use_default_dns 'direct'
+	option chinadns_ng_default_tag 'none'
+	option use_direct_list '1'
+	option use_proxy_list '1'
+	option use_block_list '1'
+	option use_gfw_list '1'
+	option chn_list 'direct'
+	option tcp_proxy_mode 'proxy'
+	option udp_proxy_mode 'proxy'
+	option localhost_proxy '1'
+	option client_proxy '1'
 	option acl_enable '0'
-	option close_log_tcp '0'
-	option close_log_udp '0'
+	option log_tcp '1'
+	option log_udp '1'
 	option loglevel 'error'
 	option trojan_loglevel '4'
 
@@ -41,8 +47,7 @@ config global_forwarding
 	option ipv6_tproxy '0'
 
 config global_xray
-	option sniffing '1'
-	option route_only '0'
+	option sniffing_override_dest '0'
 
 config global_singbox
 	option sniff_override_destination '0'
@@ -52,7 +57,8 @@ config global_singbox
 	option geosite_url 'https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.db'
 
 config global_other
-	option nodes_ping 'auto_ping tcping'
+	option auto_detection_time 'tcping'
+	option show_node_info '0'
 
 config global_rules
 	option auto_update '0'
@@ -74,8 +80,6 @@ config global_rules
 config global_app
 	option singbox_file '/usr/bin/sing-box'
 	option xray_file '/usr/bin/xray'
-	option trojan_go_file '/usr/bin/trojan-go'
-	option brook_file '/usr/bin/brook'
 	option hysteria_file '/usr/bin/hysteria'
 	option chinadns_ng '/usr/bin/chinadns-ng'
 
@@ -196,8 +200,12 @@ config shunt_rules 'Direct'
 	option remarks 'Direct'
 	option domain_list 'geosite:cn'
 	option ip_list '223.5.5.5/32
+223.6.6.6/32
 119.29.29.29/32
 180.76.76.76/32
 114.114.114.114/32
+114.114.115.115/32
+1.12.12.12/32
+120.53.53.53/32
 geoip:cn
 geoip:private'
