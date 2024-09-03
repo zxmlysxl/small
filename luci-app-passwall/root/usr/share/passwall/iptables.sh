@@ -34,7 +34,7 @@ ip6t_m="$ip6t -t mangle -w"
 [ -z "$ip6t" -o -z "$(lsmod | grep 'ip6table_nat')" ] && ip6t_n="eval #$ip6t_n"
 [ -z "$ip6t" -o -z "$(lsmod | grep 'ip6table_mangle')" ] && ip6t_m="eval #$ip6t_m"
 FWI=$(uci -q get firewall.passwall.path 2>/dev/null)
-FAKE_IP="198.18.0.0/16"
+FAKE_IP="198.18.0.0/15"
 
 factor() {
 	if [ -z "$1" ] || [ -z "$2" ]; then
@@ -698,8 +698,17 @@ filter_node() {
 }
 
 dns_hijack() {
-	$ipt_n -I PSW -p udp --dport 53 -j REDIRECT --to-ports 53
-	echolog "强制转发本机DNS端口 UDP/53 的请求[$?]"
+	[ $(config_t_get global dns_redirect "0") = "1" ] && {
+		$ipt_m -A PSW -p udp --dport 53 -j RETURN
+		$ipt_m -A PSW -p tcp --dport 53 -j RETURN
+		$ip6t_m -A PSW -p udp --dport 53 -j RETURN
+		$ip6t_m -A PSW -p tcp --dport 53 -j RETURN
+		$ipt_n -I PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 53 -m comment --comment "PSW_DNS_Hijack" 2>/dev/null
+		$ipt_n -I PREROUTING -p tcp --dport 53 -j REDIRECT --to-ports 53 -m comment --comment "PSW_DNS_Hijack" 2>/dev/null
+		$ip6t_n -I PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 53 -m comment --comment "PSW_DNS_Hijack" 2>/dev/null
+		$ip6t_n -I PREROUTING -p tcp --dport 53 -j REDIRECT --to-ports 53 -m comment --comment "PSW_DNS_Hijack" 2>/dev/null
+		echolog "  - 开启 DNS 重定向"
+	}
 }
 
 add_firewall_rule() {
@@ -841,14 +850,24 @@ add_firewall_rule() {
 	$ipt_m -N PSW_OUTPUT
 	$ipt_m -A PSW_OUTPUT $(dst $IPSET_LANLIST) -j RETURN
 	$ipt_m -A PSW_OUTPUT $(dst $IPSET_VPSLIST) -j RETURN
-	[ -n "$LOCAL_DNS" ] && {
-		for local_dns in $(echo $LOCAL_DNS | tr ',' ' '); do
-			local dns_address=$(echo $local_dns | awk -F '#' '{print $1}')
-			local dns_port=$(echo $local_dns | awk -F '#' '{print $2}')
-			$ipt_m -A PSW_OUTPUT -p udp -d ${dns_address} --dport ${dns_port:-53} -j RETURN
-			echolog "  - [$?]追加直连DNS到iptables：${dns_address}:${dns_port:-53}"
+
+	[ -n "$IPT_APPEND_DNS" ] && {
+		local local_dns dns_address dns_port
+		for local_dns in $(echo $IPT_APPEND_DNS | tr ',' ' '); do
+			dns_address=$(echo "$local_dns" | sed -E 's/(@|\[)?([0-9a-fA-F:.]+)(@|#|$).*/\2/')
+			dns_port=$(echo "$local_dns" | sed -nE 's/.*#([0-9]+)$/\1/p')
+			if echo "$dns_address" | grep -q -v ':'; then
+				$ipt_m -A PSW_OUTPUT -p udp -d ${dns_address} --dport ${dns_port:-53} -j RETURN
+				$ipt_m -A PSW_OUTPUT -p tcp -d ${dns_address} --dport ${dns_port:-53} -j RETURN
+				echolog "  - [$?]追加直连DNS到iptables：${dns_address}:${dns_port:-53}"
+			else
+				$ip6t_m -A PSW_OUTPUT -p udp -d ${dns_address} --dport ${dns_port:-53} -j RETURN
+				$ip6t_m -A PSW_OUTPUT -p tcp -d ${dns_address} --dport ${dns_port:-53} -j RETURN
+				echolog "  - [$?]追加直连DNS到iptables：[${dns_address}]:${dns_port:-53}"
+			fi
 		done
 	}
+
 	[ "${USE_DIRECT_LIST}" = "1" ] && $ipt_m -A PSW_OUTPUT $(dst $IPSET_WHITELIST) -j RETURN
 	$ipt_m -A PSW_OUTPUT -m mark --mark 0xff -j RETURN
 	[ "${USE_BLOCK_LIST}" = "1" ] && $ipt_m -A PSW_OUTPUT $(dst $IPSET_BLOCKLIST) -j DROP
@@ -992,18 +1011,29 @@ add_firewall_rule() {
 		if [ "$TCP_NODE" != "nil" ]; then
 			_proxy_tcp_access() {
 				[ -n "${2}" ] || return 0
-				ipset -q test $IPSET_LANLIST ${2}
-				[ $? -eq 0 ] && {
-					echolog "  - 上游 DNS 服务器 ${2} 已在直接访问的列表中，不强制向 TCP 代理转发对该服务器 TCP/${3} 端口的访问"
-					return 0
-				}
-				if [ -z "${is_tproxy}" ]; then
-					$ipt_n -I PSW_OUTPUT -p tcp -d ${2} --dport ${3} $(REDIRECT $TCP_REDIR_PORT)
+				if echo "${2}" | grep -q -v ':'; then
+					ipset -q test $IPSET_LANLIST ${2}
+					[ $? -eq 0 ] && {
+						echolog "  - 上游 DNS 服务器 ${2} 已在直接访问的列表中，不强制向 TCP 代理转发对该服务器 TCP/${3} 端口的访问"
+						return 0
+					}
+					if [ -z "${is_tproxy}" ]; then
+						$ipt_n -I PSW_OUTPUT -p tcp -d ${2} --dport ${3} $(REDIRECT $TCP_REDIR_PORT)
+					else
+						$ipt_m -I PSW_OUTPUT -p tcp -d ${2} --dport ${3} -j PSW_RULE
+						$ipt_m -I PSW $(comment "本机") -p tcp -i lo -d ${2} --dport ${3} $(REDIRECT $TCP_REDIR_PORT TPROXY)
+					fi
+					echolog "  - [$?]将上游 DNS 服务器 ${2}:${3} 加入到路由器自身代理的 TCP 转发链"
 				else
-					$ipt_m -I PSW_OUTPUT -p tcp -d ${2} --dport ${3} -j PSW_RULE
-					$ipt_m -I PSW $(comment "本机") -p tcp -i lo -d ${2} --dport ${3} $(REDIRECT $TCP_REDIR_PORT TPROXY)
+					ipset -q test $IPSET_LANLIST6 ${2}
+					[ $? -eq 0 ] && {
+						echolog "  - 上游 DNS 服务器 ${2} 已在直接访问的列表中，不强制向 TCP 代理转发对该服务器 TCP/${3} 端口的访问"
+						return 0
+					}
+					$ip6t_m -I PSW_OUTPUT -p tcp -d ${2} --dport ${3} -j PSW_RULE
+					$ip6t_m -I PSW $(comment "本机") -p tcp -i lo -d ${2} --dport ${3} $(REDIRECT $TCP_REDIR_PORT TPROXY)
+					echolog "  - [$?]将上游 DNS 服务器 [${2}]:${3} 加入到路由器自身代理的 TCP 转发链，请确保您的节点支持IPv6，并开启IPv6透明代理！"
 				fi
-				echolog "  - [$?]将上游 DNS 服务器 ${2}:${3} 加入到路由器自身代理的 TCP 转发链"
 			}
 			[ "$use_tcp_node_resolve_dns" == 1 ] && hosts_foreach REMOTE_DNS _proxy_tcp_access 53
 
@@ -1068,14 +1098,25 @@ add_firewall_rule() {
 		if [ "$UDP_NODE" != "nil" -o "$TCP_UDP" = "1" ]; then
 			_proxy_udp_access() {
 				[ -n "${2}" ] || return 0
-				ipset -q test $IPSET_LANLIST ${2}
-				[ $? == 0 ] && {
-					echolog "  - 上游 DNS 服务器 ${2} 已在直接访问的列表中，不强制向 UDP 代理转发对该服务器 UDP/${3} 端口的访问"
-					return 0
-				}
-				$ipt_m -I PSW_OUTPUT -p udp -d ${2} --dport ${3} -j PSW_RULE
-				$ipt_m -I PSW $(comment "本机") -p udp -i lo -d ${2} --dport ${3} $(REDIRECT $UDP_REDIR_PORT TPROXY)
-				echolog "  - [$?]将上游 DNS 服务器 ${2}:${3} 加入到路由器自身代理的 UDP 转发链"
+				if echo "${2}" | grep -q -v ':'; then
+					ipset -q test $IPSET_LANLIST ${2}
+					[ $? == 0 ] && {
+						echolog "  - 上游 DNS 服务器 ${2} 已在直接访问的列表中，不强制向 UDP 代理转发对该服务器 UDP/${3} 端口的访问"
+						return 0
+					}
+					$ipt_m -I PSW_OUTPUT -p udp -d ${2} --dport ${3} -j PSW_RULE
+					$ipt_m -I PSW $(comment "本机") -p udp -i lo -d ${2} --dport ${3} $(REDIRECT $UDP_REDIR_PORT TPROXY)
+					echolog "  - [$?]将上游 DNS 服务器 ${2}:${3} 加入到路由器自身代理的 UDP 转发链"
+				else
+					ipset -q test $IPSET_LANLIST6 ${2}
+					[ $? == 0 ] && {
+						echolog "  - 上游 DNS 服务器 ${2} 已在直接访问的列表中，不强制向 UDP 代理转发对该服务器 UDP/${3} 端口的访问"
+						return 0
+					}
+					$ip6t_m -I PSW_OUTPUT -p udp -d ${2} --dport ${3} -j PSW_RULE
+					$ip6t_m -I PSW $(comment "本机") -p udp -i lo -d ${2} --dport ${3} $(REDIRECT $UDP_REDIR_PORT TPROXY)
+					echolog "  - [$?]将上游 DNS 服务器 [${2}]:${3} 加入到路由器自身代理的 UDP 转发链，请确保您的节点支持IPv6，并开启IPv6透明代理！"
+				fi
 			}
 			[ "$use_udp_node_resolve_dns" == 1 ] && hosts_foreach REMOTE_DNS _proxy_udp_access 53
 
@@ -1111,14 +1152,7 @@ add_firewall_rule() {
 		$ip6t_m -I OUTPUT $(comment "mangle-OUTPUT-PSW") -o lo -j RETURN
 		insert_rule_before "$ip6t_m" "OUTPUT" "mwan3" "$(comment mangle-OUTPUT-PSW) -m mark --mark 1 -j RETURN"
 
-		[ $(config_t_get global dns_redirect "0") = "1" ] && {
-			$ipt_m -A PSW -p udp --dport 53 -j RETURN	
-			$ip6t_m -A PSW -p udp --dport 53 -j RETURN
-			$ipt_n -I PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 53 -m comment --comment "PSW_DNS_Hijack" 2>/dev/null
-			$ipt_n -I PREROUTING -p tcp --dport 53 -j REDIRECT --to-ports 53 -m comment --comment "PSW_DNS_Hijack" 2>/dev/null
-			$ip6t_n -I PREROUTING -p udp --dport 53 -j REDIRECT --to-ports 53 -m comment --comment "PSW_DNS_Hijack" 2>/dev/null
-			$ip6t_n -I PREROUTING -p tcp --dport 53 -j REDIRECT --to-ports 53 -m comment --comment "PSW_DNS_Hijack" 2>/dev/null
-		}
+		dns_hijack
 
 	}
 

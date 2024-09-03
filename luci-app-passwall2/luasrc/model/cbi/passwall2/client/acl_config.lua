@@ -202,6 +202,17 @@ o:value("default", translate("Use global config") .. "(" .. UDP_REDIR_PORTS .. "
 o:value("1:65535", translate("All"))
 o.validate = port_validate
 
+o = s:option(ListValue, "direct_dns_query_strategy", translate("Direct Query Strategy"))
+o.default = "UseIP"
+o:value("UseIP")
+o:value("UseIPv4")
+o:value("UseIPv6")
+o:depends({ node = "default",  ['!reverse'] = true })
+
+o = s:option(Flag, "write_ipset_direct", translate("Direct DNS result write to IPSet"), translate("Perform the matching direct domain name rules into IP to IPSet/NFTSet, and then connect directly (not entering the core). Maybe conflict with some special circumstances."))
+o.default = "1"
+o:depends({ node = "default",  ['!reverse'] = true })
+
 o = s:option(ListValue, "remote_dns_protocol", translate("Remote DNS Protocol"))
 o:value("tcp", "TCP")
 o:value("doh", "DoH")
@@ -217,6 +228,7 @@ o:value("1.1.1.2", "1.1.1.2 (CloudFlare-Security)")
 o:value("8.8.4.4", "8.8.4.4 (Google)")
 o:value("8.8.8.8", "8.8.8.8 (Google)")
 o:value("9.9.9.9", "9.9.9.9 (Quad9-Recommended)")
+o:value("149.112.112.112", "149.112.112.112 (Quad9-Recommended)")
 o:value("208.67.220.220", "208.67.220.220 (OpenDNS)")
 o:value("208.67.222.222", "208.67.222.222 (OpenDNS)")
 o:depends("remote_dns_protocol", "tcp")
@@ -228,7 +240,8 @@ o:value("https://1.1.1.1/dns-query", "CloudFlare")
 o:value("https://1.1.1.2/dns-query", "CloudFlare-Security")
 o:value("https://8.8.4.4/dns-query", "Google 8844")
 o:value("https://8.8.8.8/dns-query", "Google 8888")
-o:value("https://9.9.9.9/dns-query", "Quad9-Recommended")
+o:value("https://9.9.9.9/dns-query", "Quad9-Recommended 9.9.9.9")
+o:value("https://149.112.112.112/dns-query", "Quad9-Recommended 149.112.112.112")
 o:value("https://208.67.222.222/dns-query", "OpenDNS")
 o:value("https://dns.adguard.com/dns-query,176.103.130.130", "AdGuard")
 o:value("https://doh.libredns.gr/dns-query,116.202.176.26", "LibreDNS")
@@ -288,9 +301,5 @@ for k, v in pairs(nodes_table) do
 		s.fields["dns_hosts"]:depends({ node = v.id })
 	end
 end
-
-o = s:option(Flag, "write_ipset_direct", translate("Direct DNS result write to IPSet"), translate("Perform the matching direct domain name rules into IP to IPSet/NFTSet, and then connect directly (not entering the core). Maybe conflict with some special circumstances."))
-o.default = "1"
-o:depends({ node = "default",  ['!reverse'] = true })
 
 return m

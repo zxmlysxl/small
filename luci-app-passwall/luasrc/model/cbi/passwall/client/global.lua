@@ -82,7 +82,34 @@ local doh_validate = function(self, value, t)
 			return value
 		end
 	end
-	return nil, translate("DoH request address") .. " " .. translate("Format must be:") .. " URL,IP"
+	return nil, translatef("%s request address","DoH") .. " " .. translate("Format must be:") .. " URL,IP"
+end
+
+local chinadns_dot_validate = function(self, value, t)
+	local function isValidDoTString(s)
+		if s:sub(1, 6) ~= "tls://" then return false end
+		local address = s:sub(7)
+		local at_index = address:find("@")
+		local hash_index = address:find("#")
+		local ip, port
+		local domain = at_index and address:sub(1, at_index - 1) or nil
+		ip = at_index and address:sub(at_index + 1, (hash_index or 0) - 1) or address:sub(1, (hash_index or 0) - 1)
+		port = hash_index and address:sub(hash_index + 1) or nil
+		local num_port = tonumber(port)
+		if (port and (not num_port or num_port <= 0 or num_port >= 65536)) or 
+		   (domain and domain == "") or 
+		   (not datatypes.ipaddr(ip) and not datatypes.ip6addr(ip)) then
+			return false
+		end
+		return true
+	end
+	if value ~= "" then
+		value = api.trim(value)
+		if isValidDoTString(value) then
+			return value
+		end
+	end
+	return nil, translatef("%s request address","DoT") .. " " .. translate("Format must be:") .. " tls://" .. translate("Domain") .. "@IP[#Port] | tls://IP[#Port]"
 end
 
 m:append(Template(appname .. "/global/status"))
@@ -265,6 +292,50 @@ s:tab("DNS", translate("DNS"))
 dns_shunt = s:taboption("DNS", ListValue, "dns_shunt", "DNS " .. translate("Shunt"))
 dns_shunt:value("dnsmasq", "Dnsmasq")
 dns_shunt:value("chinadns-ng", "Dnsmasq + ChinaDNS-NG")
+
+o = s:taboption("DNS", ListValue, "direct_dns_mode", translate("Direct DNS") .. " " .. translate("Request protocol"))
+o.default = ""
+o:value("", translate("Auto"))
+o:value("udp", translatef("Requery DNS By %s", "UDP"))
+o:value("tcp", translatef("Requery DNS By %s", "TCP"))
+if os.execute("chinadns-ng -V | grep -i wolfssl >/dev/null") == 0 then
+	o:value("dot", translatef("Requery DNS By %s", "DoT"))
+end
+--TO DO
+--o:value("doh", "DoH")
+o:depends({dns_shunt = "dnsmasq"})
+o:depends({dns_shunt = "chinadns-ng"})
+
+o = s:taboption("DNS", Value, "direct_dns_udp", translate("Direct DNS"))
+o.datatype = "or(ipaddr,ipaddrport)"
+o.default = "223.5.5.5"
+o:value("223.5.5.5")
+o:value("223.6.6.6")
+o:value("119.29.29.29")
+o:value("180.184.1.1")
+o:value("180.184.2.2")
+o:value("114.114.114.114")
+o:depends("direct_dns_mode", "udp")
+
+o = s:taboption("DNS", Value, "direct_dns_tcp", translate("Direct DNS"))
+o.datatype = "or(ipaddr,ipaddrport)"
+o.default = "223.5.5.5"
+o:value("223.5.5.5")
+o:value("223.6.6.6")
+o:value("180.184.1.1")
+o:value("180.184.2.2")
+o:depends("direct_dns_mode", "tcp")
+
+o = s:taboption("DNS", Value, "direct_dns_dot", translate("Direct DNS"))
+o.default = "tls://dot.pub@1.12.12.12"
+o:value("tls://dot.pub@1.12.12.12")
+o:value("tls://dot.pub@120.53.53.53")
+o:value("tls://dot.360.cn@36.99.170.86")
+o:value("tls://dot.360.cn@101.198.191.4")
+o:value("tls://dns.alidns.com@2400:3200::1")
+o:value("tls://dns.alidns.com@2400:3200:baba::1")
+o.validate = chinadns_dot_validate
+o:depends("direct_dns_mode", "dot")
 
 o = s:taboption("DNS", Flag, "filter_proxy_ipv6", translate("Filter Proxy Host IPv6"), translate("Experimental feature."))
 o.default = "0"
