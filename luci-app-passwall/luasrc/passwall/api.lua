@@ -784,7 +784,7 @@ function to_check(arch, app_name)
 		remote_version = remote_version:gsub(com[app_name].remote_version_str_replace, "")
 	end
 	local has_update = compare_versions(local_version:match("[^v]+"), "<", remote_version:match("[^v]+"))
-
+--[[
 	if not has_update then
 		return {
 			code = 0,
@@ -792,7 +792,7 @@ function to_check(arch, app_name)
 			remote_version = remote_version
 		}
 	end
-
+]]--
 	local asset = {}
 	for _, v in ipairs(json.assets) do
 		if v.name and v.name:match(match_file_name) then
@@ -813,7 +813,7 @@ function to_check(arch, app_name)
 
 	return {
 		code = 0,
-		has_update = true,
+		has_update = has_update,
 		local_version = local_version,
 		remote_version = remote_version,
 		html_url = json.html_url,
@@ -1003,6 +1003,7 @@ function to_check_self()
 	end
 	local local_version  = get_version()
 	local remote_version = sys.exec("echo -n $(grep 'PKG_VERSION' /tmp/passwall_makefile|awk -F '=' '{print $2}')")
+	exec("/bin/rm", {"-f", tmp_file})
 
 	local has_update = compare_versions(local_version, "<", remote_version)
 	if not has_update then
@@ -1077,4 +1078,25 @@ function luci_types(id, m, s, type_name, option_prefix)
 			end
 		end
 	end
+end
+
+function get_std_domain(domain)
+	domain = trim(domain)
+	if domain == "" or domain:find("#") then return "" end
+	-- 删除首尾所有的 .
+	domain = domain:gsub("^[%.]+", ""):gsub("[%.]+$", "")
+	-- 如果 domain 包含 '*'，则分割并删除包含 '*' 的部分及其前面的部分
+	if domain:find("%*") then
+		local parts = {}
+		for part in domain:gmatch("[^%.]+") do
+			table.insert(parts, part)
+		end
+		for i = #parts, 1, -1 do
+			if parts[i]:find("%*") then
+				-- 删除包含 '*' 的部分及其前面的部分
+				return parts[i + 1] and parts[i + 1] .. "." .. table.concat(parts, ".", i + 2) or ""
+			end
+		end
+	end
+	return domain
 end

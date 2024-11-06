@@ -5,6 +5,7 @@ local sys = api.sys
 local jsonc = api.jsonc
 local appname = "passwall"
 local fs = api.fs
+local split = api.split
 
 local new_port
 
@@ -96,7 +97,7 @@ function gen_outbound(flag, node, tag, proxy_table)
 				--max_version = "1.3",
 				ech = {
 					enabled = (node.ech == "1") and true or false,
-					config = (node.ech_config and node.ech_config:gsub("\\n","\n")) and node.ech_config:gsub("\\n","\n") or nil,
+					config = node.ech_config and split(node.ech_config:gsub("\\n", "\n"), "\n") or {},
 					pq_signature_schemes_enabled = node.pq_signature_schemes_enabled and true or false,
 					dynamic_record_sizing_disabled = node.dynamic_record_sizing_disabled and true or false
 				},
@@ -306,7 +307,7 @@ function gen_outbound(flag, node, tag, proxy_table)
 					} or nil,
 					ech = {
 						enabled = (node.ech == "1") and true or false,
-						config = (node.ech_config and node.ech_config:gsub("\\n","\n")) and node.ech_config:gsub("\\n","\n") or nil,
+						config = node.ech_config and split(node.ech_config:gsub("\\n", "\n"), "\n") or {},
 						pq_signature_schemes_enabled = node.pq_signature_schemes_enabled and true or false,
 						dynamic_record_sizing_disabled = node.dynamic_record_sizing_disabled and true or false
 					}
@@ -340,7 +341,7 @@ function gen_outbound(flag, node, tag, proxy_table)
 					} or nil,
 					ech = {
 						enabled = (node.ech == "1") and true or false,
-						config = (node.ech_config and node.ech_config:gsub("\\n","\n")) and node.ech_config:gsub("\\n","\n") or nil,
+						config = node.ech_config and split(node.ech_config:gsub("\\n", "\n"), "\n") or {},
 						pq_signature_schemes_enabled = node.pq_signature_schemes_enabled and true or false,
 						dynamic_record_sizing_disabled = node.dynamic_record_sizing_disabled and true or false
 					}
@@ -363,7 +364,7 @@ function gen_outbound(flag, node, tag, proxy_table)
 					insecure = (node.tls_allowInsecure == "1") and true or false,
 					ech = {
 						enabled = (node.ech == "1") and true or false,
-						config = (node.ech_config and node.ech_config:gsub("\\n","\n")) and node.ech_config:gsub("\\n","\n") or nil,
+						config = node.ech_config and split(node.ech_config:gsub("\\n", "\n"), "\n") or {},
 						pq_signature_schemes_enabled = node.pq_signature_schemes_enabled and true or false,
 						dynamic_record_sizing_disabled = node.dynamic_record_sizing_disabled and true or false
 					}
@@ -411,7 +412,7 @@ function gen_config_server(node)
 	if node.tls == "1" and node.ech == "1" then
 		tls.ech = {
 			enabled = true,
-			key = (node.ech_key and node.ech_key:gsub("\\n","\n")) and node.ech_key:gsub("\\n","\n") or nil,
+			key = node.ech_key and split(node.ech_key:gsub("\\n", "\n"), "\n") or {},
 			pq_signature_schemes_enabled = (node.pq_signature_schemes_enabled == "1") and true or false,
 			dynamic_record_sizing_disabled = (node.dynamic_record_sizing_disabled == "1") and true or false,
 		}
@@ -619,22 +620,26 @@ function gen_config_server(node)
 	end
 
 	if node.protocol == "tuic" then
-		tls.alpn = (node.tuic_alpn and node.tuic_alpn ~= "") and {
-			node.tuic_alpn
-		} or nil
-		protocol_table = {
-			users = {
-				{
-					name = "user1",
-					uuid = node.uuid,
+		if node.uuid then
+			local users = {}
+			for i = 1, #node.uuid do
+				users[i] = {
+					name = node.uuid[i],
+					uuid = node.uuid[i],
 					password = node.password
 				}
-			},
-			congestion_control = node.tuic_congestion_control or "cubic",
-			zero_rtt_handshake = (node.tuic_zero_rtt_handshake == "1") and true or false,
-			heartbeat = node.tuic_heartbeat .. "s",
-			tls = tls
-		}
+			end
+			tls.alpn = (node.tuic_alpn and node.tuic_alpn ~= "") and {
+				node.tuic_alpn
+			} or nil
+			protocol_table = {
+				users = users,
+				congestion_control = node.tuic_congestion_control or "cubic",
+				zero_rtt_handshake = (node.tuic_zero_rtt_handshake == "1") and true or false,
+				heartbeat = node.tuic_heartbeat .. "s",
+				tls = tls
+			}
+		end
 	end
 
 	if node.protocol == "hysteria2" then
