@@ -53,17 +53,41 @@ local function insert_unique(dest_table, value, lookup_table)
 	end
 end
 
-local function merge_array(lines1, lines2)
-	for i, line in ipairs(lines2) do
-		table.insert(lines1, #lines1 + 1, line)
+local function merge_array(array1, array2)
+	for i, line in ipairs(array2) do
+		table.insert(array1, #array1 + 1, line)
 	end
+end
+
+local function insert_array_before(array1, array2, target) --将array2插入到array1的target前面，target不存在则追加
+	for i, line in ipairs(array1) do
+		if line == target then
+			for j = #array2, 1, -1 do
+				table.insert(array1, i, array2[j])
+			end
+			return
+		end
+	end
+	merge_array(array1, array2)
+end
+
+local function insert_array_after(array1, array2, target) --将array2插入到array1的target后面，target不存在则追加
+	for i, line in ipairs(array1) do
+		if line == target then
+			for j = 1, #array2 do
+				table.insert(array1, i + j, array2[j])
+			end
+			return
+		end
+	end
+	merge_array(array1, array2)
 end
 
 if not fs.access(TMP_ACL_PATH) then
 	fs.mkdir(TMP_ACL_PATH, 493)
 end
 
-local setflag= (NFTFLAG == "1") and "inet@passwall@" or ""
+local setflag = (NFTFLAG == "1") and "inet@passwall@" or ""
 
 config_lines = {
 	--"verbose",
@@ -74,46 +98,61 @@ config_lines = {
 	"filter-qtype 65"
 }
 
---GFW列表
-if GFWLIST == "1" and is_file_nonzero(RULES_PATH .. "/gfwlist") then
-	tmp_lines = {
-		"gfwlist-file " .. RULES_PATH .. "/gfwlist",
-		"add-taggfw-ip " .. setflag .. "passwall_gfwlist," .. setflag .. "passwall_gfwlist6"
-	}
-	merge_array(config_lines, tmp_lines)
-	if NO_IPV6_TRUST == "1" then table.insert(config_lines, "no-ipv6 tag:gfw") end
-	log(string.format("  - 防火墙域名表(gfwlist)：%s", DNS_TRUST or "默认"))
-end
-
---中国列表
-if CHNLIST ~= "0" and is_file_nonzero(RULES_PATH .. "/chnlist") then
-	if CHNLIST == "direct" then
-		tmp_lines = {
-			"chnlist-file " .. RULES_PATH .. "/chnlist",
-			"ipset-name4 " .. setflag .. "passwall_chnroute",
-			"ipset-name6 " .. setflag .. "passwall_chnroute6",
-			"add-tagchn-ip",
-			"chnlist-first"
-		}
-		merge_array(config_lines, tmp_lines)
-		log(string.format("  - 中国域名表(chnroute)：%s", DNS_LOCAL or "默认"))
-	end
-
-	--回中国模式
-	if CHNLIST == "proxy" then
-		tmp_lines = {
-			"group chn_proxy",
-			"group-dnl " .. RULES_PATH .. "/chnlist",
-			"group-upstream " .. DNS_TRUST,
-			"group-ipset " .. setflag .. "passwall_chnroute," .. setflag .. "passwall_chnroute6"
-		}
-		merge_array(config_lines, tmp_lines)
-		if NO_IPV6_TRUST == "1" then table.insert(config_lines, "no-ipv6 tag:chn_proxy") end
-		log(string.format("  - 中国域名表(chnroute)：%s", DNS_TRUST or "默认"))
-	end
+for i = 1, 6 do
+	table.insert(config_lines, "#--" .. i)
 end
 
 --自定义规则组，后声明的组具有更高优先级
+--屏蔽列表
+local file_block_host = TMP_ACL_PATH .. "/block_host"
+if USE_BLOCK_LIST == "1" and not fs.access(file_block_host) then   --对自定义列表进行清洗
+	local block_domain, lookup_block_domain = {}, {}
+	for line in io.lines(RULES_PATH .. "/block_host") do
+		line = api.get_std_domain(line)
+		if line ~= "" and not line:find("#") then
+			insert_unique(block_domain, line, lookup_block_domain)
+		end
+	end
+	if #block_domain > 0 then
+		local f_out = io.open(file_block_host, "w")
+		for i = 1, #block_domain do
+			f_out:write(block_domain[i] .. "\n")
+		end
+		f_out:close()
+	end
+end
+if USE_BLOCK_LIST == "1" and is_file_nonzero(file_block_host) then
+	tmp_lines = {
+		"group null",
+		"group-dnl " .. file_block_host
+	}
+	insert_array_after(config_lines, tmp_lines, "#--5")
+end
+
+--始终用国内DNS解析节点域名
+local file_vpslist = TMP_ACL_PATH .. "/vpslist"
+if not is_file_nonzero(file_vpslist) then
+	local f_out = io.open(file_vpslist, "w")
+	uci:foreach(appname, "nodes", function(t)
+		local address = t.address
+		if address == "engage.cloudflareclient.com" then return end
+		if datatypes.hostname(address) then
+			f_out:write(address .. "\n")
+		end
+	end)
+	f_out:close()
+end
+if is_file_nonzero(file_vpslist) then
+	tmp_lines = {
+		"group vpslist",
+		"group-dnl " .. file_vpslist,
+		"group-upstream " .. DNS_LOCAL,
+		"group-ipset " .. setflag .. "passwall_vpslist," .. setflag .. "passwall_vpslist6"
+	}
+	insert_array_after(config_lines, tmp_lines, "#--6")
+	log(string.format("  - 节点列表中的域名(vpslist)：%s", DNS_LOCAL or "默认"))
+end
+
 --直连（白名单）列表
 local file_direct_host = TMP_ACL_PATH .. "/direct_host"
 if USE_DIRECT_LIST == "1" and not fs.access(file_direct_host) then   --对自定义列表进行清洗
@@ -139,7 +178,7 @@ if USE_DIRECT_LIST == "1" and is_file_nonzero(file_direct_host) then
 		"group-upstream " .. DNS_LOCAL,
 		"group-ipset " .. setflag .. "passwall_whitelist," .. setflag .. "passwall_whitelist6"
 	}
-	merge_array(config_lines, tmp_lines)
+	insert_array_after(config_lines, tmp_lines, "#--4")
 	log(string.format("  - 域名白名单(whitelist)：%s", DNS_LOCAL or "默认"))
 end
 
@@ -168,56 +207,49 @@ if USE_PROXY_LIST == "1" and is_file_nonzero(file_proxy_host) then
 		"group-upstream " .. DNS_TRUST,
 		"group-ipset " .. setflag .. "passwall_blacklist," .. setflag .. "passwall_blacklist6"
 	}
-	merge_array(config_lines, tmp_lines)
-	if NO_IPV6_TRUST == "1" then table.insert(config_lines, "no-ipv6 tag:proxylist") end
+	if NO_IPV6_TRUST == "1" then table.insert(tmp_lines, "no-ipv6 tag:proxylist") end
+	insert_array_after(config_lines, tmp_lines, "#--3")
 	log(string.format("  - 代理域名表(blacklist)：%s", DNS_TRUST or "默认"))
 end
 
---屏蔽列表
-local file_block_host = TMP_ACL_PATH .. "/block_host"
-if USE_BLOCK_LIST == "1" and not fs.access(file_block_host) then   --对自定义列表进行清洗
-	local block_domain, lookup_block_domain = {}, {}
-	for line in io.lines(RULES_PATH .. "/block_host") do
-		line = api.get_std_domain(line)
-		if line ~= "" and not line:find("#") then
-			insert_unique(block_domain, line, lookup_block_domain)
-		end
-	end
-	if #block_domain > 0 then
-		local f_out = io.open(file_block_host, "w")
-		for i = 1, #block_domain do
-			f_out:write(block_domain[i] .. "\n")
-		end
-		f_out:close()
-	end
-end
-if USE_BLOCK_LIST == "1" and is_file_nonzero(file_block_host) then
-	table.insert(config_lines, "group null")
-	table.insert(config_lines, "group-dnl " .. file_block_host)
+--内置组(chn/gfw)优先级在自定义组后
+--GFW列表
+if GFWLIST == "1" and is_file_nonzero(RULES_PATH .. "/gfwlist") then
+	tmp_lines = {
+		"gfwlist-file " .. RULES_PATH .. "/gfwlist",
+		"add-taggfw-ip " .. setflag .. "passwall_gfwlist," .. setflag .. "passwall_gfwlist6"
+	}
+	if NO_IPV6_TRUST == "1" then table.insert(tmp_lines, "no-ipv6 tag:gfw") end
+	merge_array(config_lines, tmp_lines)
+	log(string.format("  - 防火墙域名表(gfwlist)：%s", DNS_TRUST or "默认"))
 end
 
---始终用国内DNS解析节点域名
-local file_vpslist = TMP_ACL_PATH .. "/vpslist"
-if not is_file_nonzero(file_vpslist) then
-	local f_out = io.open(file_vpslist, "w")
-	uci:foreach(appname, "nodes", function(t)
-		local address = t.address
-		if address == "engage.cloudflareclient.com" then return end
-		if datatypes.hostname(address) then
-			f_out:write(address .. "\n")
-		end
-	end)
-	f_out:close()
-end
-if is_file_nonzero(file_vpslist) then
-	tmp_lines = {
-		"group vpslist",
-		"group-dnl " .. file_vpslist,
-		"group-upstream " .. DNS_LOCAL,
-		"group-ipset " .. setflag .. "passwall_vpslist," .. setflag .. "passwall_vpslist6"
-	}
-	merge_array(config_lines, tmp_lines)
-	log(string.format("  - 节点列表中的域名(vpslist)：%s", DNS_LOCAL or "默认"))
+--中国列表
+if CHNLIST ~= "0" and is_file_nonzero(RULES_PATH .. "/chnlist") then
+	if CHNLIST == "direct" then
+		tmp_lines = {
+			"chnlist-file " .. RULES_PATH .. "/chnlist",
+			"ipset-name4 " .. setflag .. "passwall_chnroute",
+			"ipset-name6 " .. setflag .. "passwall_chnroute6",
+			"add-tagchn-ip",
+			"chnlist-first"
+		}
+		merge_array(config_lines, tmp_lines)
+		log(string.format("  - 中国域名表(chnroute)：%s", DNS_LOCAL or "默认"))
+	end
+
+	--回中国模式
+	if CHNLIST == "proxy" then
+		tmp_lines = {
+			"group chn_proxy",
+			"group-dnl " .. RULES_PATH .. "/chnlist",
+			"group-upstream " .. DNS_TRUST,
+			"group-ipset " .. setflag .. "passwall_chnroute," .. setflag .. "passwall_chnroute6"
+		}
+		if NO_IPV6_TRUST == "1" then table.insert(tmp_lines, "no-ipv6 tag:chn_proxy") end
+		insert_array_after(config_lines, tmp_lines, "#--1")
+		log(string.format("  - 中国域名表(chnroute)：%s", DNS_TRUST or "默认"))
+	end
 end
 
 --分流规则
@@ -299,15 +331,7 @@ if uci:get(appname, TCP_NODE, "protocol") == "_shunt" then
 			"group-ipset " .. setflag .. "passwall_shuntlist," .. setflag .. "passwall_shuntlist6"
 		}
 		if NO_IPV6_TRUST == "1" then table.insert(tmp_lines, "no-ipv6 tag:shuntlist") end
-		-- 在 "filter-qtype 65" 后插入 tmp_lines （shuntlist优先级最低）
-		for i, line in ipairs(config_lines) do
-			if line == "filter-qtype 65" then
-				for j, tmp_line in ipairs(tmp_lines) do
-					table.insert(config_lines, i + j, tmp_line)
-				end
-				break
-			end
-		end
+		insert_array_after(config_lines, tmp_lines, "#--2")
 	end
 
 end
@@ -350,7 +374,10 @@ end
 --输出配置文件
 if #config_lines > 0 then
 	for i = 1, #config_lines do
-		print(config_lines[i])
+		line = config_lines[i]
+		if line ~= "" and not line:find("^#--") then
+			print(line)
+		end
 	end
 end
 
