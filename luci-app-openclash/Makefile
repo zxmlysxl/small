@@ -63,7 +63,7 @@ define Build/Prepare
 	mkdir -p $(PKG_BUILD_DIR)/root/etc/openclash/config
 	mkdir -p $(PKG_BUILD_DIR)/root/etc/openclash/rule_provider
 	mkdir -p $(PKG_BUILD_DIR)/root/etc/openclash/backup
-	mkdir -p $(PKG_BUILD_DIR)/root/etc/openclash/core
+	#mkdir -p $(PKG_BUILD_DIR)/root/etc/openclash/core
 	mkdir -p $(PKG_BUILD_DIR)/root/usr/share/openclash/backup
 	cp -f "$(PKG_BUILD_DIR)/root/etc/config/openclash" "$(PKG_BUILD_DIR)/root/usr/share/openclash/backup/openclash" >/dev/null 2>&1
 	cp -f "$(PKG_BUILD_DIR)/root/etc/openclash/custom/openclash_custom_rules.list" "$(PKG_BUILD_DIR)/root/usr/share/openclash/backup/openclash_custom_rules.list" >/dev/null 2>&1
