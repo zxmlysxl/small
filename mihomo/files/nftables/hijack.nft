@@ -16,6 +16,11 @@ table inet mihomo {
 		}
 	}
 
+	set bypass_dscp {
+		type dscp
+		flags interval
+	}
+
 	set dns_hijack_nfproto {
 		type nf_proto
 		flags interval
@@ -170,7 +175,7 @@ table inet mihomo {
 
 	chain dstnat {
 		type nat hook prerouting priority dstnat + 1; policy accept;
-		fib daddr type local counter return
+		fib daddr type { local, multicast, broadcast, anycast } counter return
 		ct direction reply counter return
 		ip daddr @reserved_ip counter return
 		ip6 daddr @reserved_ip6 counter return
@@ -178,13 +183,15 @@ table inet mihomo {
 		ip6 daddr @china_ip6 counter return
 		meta nfproto ipv4 meta l4proto . th dport != @proxy_dport ip daddr != $FAKE_IP counter return
 		meta nfproto ipv6 meta l4proto . th dport != @proxy_dport counter return
+		meta l4proto { tcp, udp } ip dscp == @bypass_dscp ip daddr != $FAKE_IP counter return
+		meta l4proto { tcp, udp } ip6 dscp == @bypass_dscp counter return
 	}
 
 	chain nat_output {
 		type nat hook output priority filter; policy accept;
 		meta skuid @bypass_user counter return
 		meta skgid @bypass_group counter return
-		fib daddr type local counter return
+		fib daddr type { local, multicast, broadcast, anycast } counter return
 		ct direction reply counter return
 		ip daddr @reserved_ip counter return
 		ip6 daddr @reserved_ip6 counter return
@@ -192,13 +199,15 @@ table inet mihomo {
 		ip6 daddr @china_ip6 counter return
 		meta nfproto ipv4 meta l4proto . th dport != @proxy_dport ip daddr != $FAKE_IP counter return
 		meta nfproto ipv6 meta l4proto . th dport != @proxy_dport counter return
+		meta l4proto { tcp, udp } ip dscp == @bypass_dscp ip daddr != $FAKE_IP counter return
+		meta l4proto { tcp, udp } ip6 dscp == @bypass_dscp counter return
 	}
 
 	chain mangle_prerouting {
 		type filter hook prerouting priority mangle; policy accept;
 		meta l4proto { tcp, udp } iifname lo meta mark & $FW_MARK_MASK == $FW_MARK tproxy to :$TPROXY_PORT counter accept
 		meta l4proto { tcp, udp } iifname $TUN_DEVICE counter accept
-		fib daddr type local counter return
+		fib daddr type { local, multicast, broadcast, anycast } counter return
 		ct direction reply counter return
 		ip daddr @reserved_ip counter return
 		ip6 daddr @reserved_ip6 counter return
@@ -206,6 +215,8 @@ table inet mihomo {
 		ip6 daddr @china_ip6 counter return
 		meta nfproto ipv4 meta l4proto . th dport != @proxy_dport ip daddr != $FAKE_IP counter return
 		meta nfproto ipv6 meta l4proto . th dport != @proxy_dport counter return
+		meta l4proto { tcp, udp } ip dscp == @bypass_dscp ip daddr != $FAKE_IP counter return
+		meta l4proto { tcp, udp } ip6 dscp == @bypass_dscp counter return
 		meta l4proto udp th dport 53 counter return
 	}
 
@@ -213,7 +224,7 @@ table inet mihomo {
 		type route hook output priority mangle; policy accept;
 		meta skuid @bypass_user counter return
 		meta skgid @bypass_group counter return
-		fib daddr type local counter return
+		fib daddr type { local, multicast, broadcast, anycast } counter return
 		ct direction reply counter return
 		ip daddr @reserved_ip counter return
 		ip6 daddr @reserved_ip6 counter return
@@ -221,6 +232,8 @@ table inet mihomo {
 		ip6 daddr @china_ip6 counter return
 		meta nfproto ipv4 meta l4proto . th dport != @proxy_dport ip daddr != $FAKE_IP counter return
 		meta nfproto ipv6 meta l4proto . th dport != @proxy_dport counter return
+		meta l4proto { tcp, udp } ip dscp == @bypass_dscp ip daddr != $FAKE_IP counter return
+		meta l4proto { tcp, udp } ip6 dscp == @bypass_dscp counter return
 		meta l4proto udp th dport 53 counter return
 	}
 }
