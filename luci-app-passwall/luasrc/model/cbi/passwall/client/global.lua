@@ -4,6 +4,7 @@ local datatypes = api.datatypes
 local fs = api.fs
 local has_singbox = api.finded_com("singbox")
 local has_xray = api.finded_com("xray")
+local has_geoview = api.is_finded("geoview")
 local has_gfwlist = fs.access("/usr/share/passwall/rules/gfwlist")
 local has_chnlist = fs.access("/usr/share/passwall/rules/chnlist")
 local has_chnroute = fs.access("/usr/share/passwall/rules/chnroute")
@@ -14,11 +15,14 @@ api.set_apply_on_parse(m)
 
 local nodes_table = {}
 for k, e in ipairs(api.get_valid_nodes()) do
-	nodes_table[#nodes_table + 1] = e
+	if not(e.type == "sing-box" and e.protocol == "_shunt" and not has_geoview) then  --Sing-Box分流节点缺少geoview组件时不允许使用
+		nodes_table[#nodes_table + 1] = e
+	end
 end
 
 local normal_list = {}
 local balancing_list = {}
+local urltest_list = {}
 local shunt_list = {}
 local iface_list = {}
 for k, v in pairs(nodes_table) do
@@ -27,6 +31,9 @@ for k, v in pairs(nodes_table) do
 	end
 	if v.protocol and v.protocol == "_balancing" then
 		balancing_list[#balancing_list + 1] = v
+	end
+	if v.protocol and v.protocol == "_urltest" then
+		urltest_list[#urltest_list + 1] = v
 	end
 	if v.protocol and v.protocol == "_shunt" then
 		shunt_list[#shunt_list + 1] = v
@@ -161,7 +168,7 @@ if (has_singbox or has_xray) and #nodes_table > 0 then
 			local vid = v.id
 			-- shunt node type, Sing-Box or Xray
 			local type = s:taboption("Main", ListValue, vid .. "-type", translate("Type"))
-			if has_singbox then
+			if has_singbox and has_geoview then
 				type:value("sing-box", "Sing-Box")
 			end
 			if has_xray then
@@ -183,6 +190,9 @@ if (has_singbox or has_xray) and #nodes_table > 0 then
 				o:value(v1.id, v1.remark)
 			end
 			for k1, v1 in pairs(balancing_list) do
+				o:value(v1.id, v1.remark)
+			end
+			for k1, v1 in pairs(urltest_list) do
 				o:value(v1.id, v1.remark)
 			end
 			for k1, v1 in pairs(iface_list) do
@@ -226,6 +236,9 @@ if (has_singbox or has_xray) and #nodes_table > 0 then
 					for k1, v1 in pairs(balancing_list) do
 						o:value(v1.id, v1.remark)
 					end
+					for k1, v1 in pairs(urltest_list) do
+						o:value(v1.id, v1.remark)
+					end
 					for k1, v1 in pairs(iface_list) do
 						o:value(v1.id, v1.remark)
 					end
@@ -250,6 +263,9 @@ if (has_singbox or has_xray) and #nodes_table > 0 then
 			for k1, v1 in pairs(balancing_list) do
 				o:value(v1.id, v1.remark)
 			end
+			for k1, v1 in pairs(urltest_list) do
+				o:value(v1.id, v1.remark)
+			end
 			for k1, v1 in pairs(iface_list) do
 				o:value(v1.id, v1.remark)
 			end
@@ -265,7 +281,7 @@ if (has_singbox or has_xray) and #nodes_table > 0 then
 			o:value("", translate("Close"))
 			o:value("main", translate("Preproxy Node"))
 			for k1, v1 in pairs(normal_list) do
-				if v1.protocol ~= "_balancing" then
+				if v1.protocol ~= "_balancing" and v1.protocol ~= "_urltest" then
 					o:depends({ [vid .. "-default_node"] = v1.id, [vid .. "-preproxy_enabled"] = "1" })
 				end
 			end

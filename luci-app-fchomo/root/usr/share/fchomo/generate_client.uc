@@ -46,10 +46,14 @@ const ucisniff = 'sniff',
       ucisubro = 'subrules';
 
 /* Hardcode options */
-const common_tcpport = uci.get(uciconf, ucifchm, 'common_tcpport') || '20-21,22,53,80,110,143,443,465,853,873,993,995,5222,8080,8443,9418',
-      common_udpport = uci.get(uciconf, ucifchm, 'common_udpport') || '20-21,22,53,80,110,143,443,853,993,995,8080,8443,9418',
-      stun_port = uci.get(uciconf, ucifchm, 'stun_port') || '3478,19302',
-      turn_port = uci.get(uciconf, ucifchm, 'turn_port') || '5349',
+const port_presets = {
+      	common_tcpport: uci.get(uciconf, ucifchm, 'common_tcpport') || '20-21,22,53,80,110,143,443,465,853,873,993,995,5222,8080,8443,9418',
+      	common_udpport: uci.get(uciconf, ucifchm, 'common_udpport') || '20-21,22,53,80,110,143,443,853,993,995,8080,8443,9418',
+      	stun_port: uci.get(uciconf, ucifchm, 'stun_port') || '3478,19302',
+      	turn_port: uci.get(uciconf, ucifchm, 'turn_port') || '5349',
+      	steam_client_port: uci.get(uciconf, ucifchm, 'steam_client_port') || '27015-27050',
+      	steam_p2p_udpport: uci.get(uciconf, ucifchm, 'steam_p2p_udpport') || '3478,4379,4380,27000-27100',
+      },
       tun_name = uci.get(uciconf, ucifchm, 'tun_name') || 'hmtun0',
       tun_addr4 = uci.get(uciconf, ucifchm, 'tun_addr4') || '198.19.0.1/30',
       tun_addr6 = uci.get(uciconf, ucifchm, 'tun_addr6') || 'fdfe:dcba:9877::1/126',
@@ -531,7 +535,12 @@ uci.foreach(uciconf, ucinode, (cfg) => {
 			enabled: true,
 			method: cfg.trojan_ss_chipher,
 			password: cfg.trojan_ss_password
-		}: null,
+		} : null,
+
+		/* AnyTLS */
+		"idle-session-check-interval": durationToSecond(cfg.anytls_idle_session_check_interval),
+		"idle-session-timeout": durationToSecond(cfg.anytls_idle_session_timeout),
+		"min-idle-session": strToInt(cfg.anytls_min_idle_session),
 
 		/* VMess / VLESS */
 		flow: cfg.vless_flow,
@@ -568,7 +577,7 @@ uci.foreach(uciconf, ucinode, (cfg) => {
 		"udp-over-tcp-version": cfg.uot_version,
 
 		/* TLS fields */
-		tls: (cfg.type in ['trojan', 'hysteria', 'hysteria2', 'tuic']) ? null : strToBool(cfg.tls),
+		tls: (cfg.type in ['trojan', 'anytls', 'hysteria', 'hysteria2', 'tuic']) ? null : strToBool(cfg.tls),
 		"disable-sni": strToBool(cfg.tls_disable_sni),
 		...arrToObj([[(cfg.type in ['vmess', 'vless']) ? 'servername' : 'sni', cfg.tls_sni]]),
 		fingerprint: cfg.tls_fingerprint,
@@ -657,9 +666,12 @@ uci.foreach(uciconf, ucipgrp, (cfg) => {
 		lazy: (cfg.lazy === '0') ? false : null,
 		"expected-status": cfg.url ? cfg.expected_status || '204' : null,
 		"max-failed-times": cfg.url ? strToInt(cfg.max_failed_times) ?? 5 : null,
+		// General fields
 		filter: parse_filter(cfg.filter),
 		"exclude-filter": parse_filter(cfg.exclude_filter),
-		"exclude-type": parse_filter(cfg.exclude_type)
+		"exclude-type": parse_filter(cfg.exclude_type),
+		hidden: strToBool(cfg.hidden),
+		icon: cfg.icon
 	});
 });
 /* Proxy Group END */
@@ -671,58 +683,51 @@ uci.foreach(uciconf, uciprov, (cfg) => {
 	if (cfg.enabled === '0')
 		return null;
 
-	/* General fields */
 	config["proxy-providers"][cfg['.name']] = {
 		type: cfg.type,
-		...(cfg.payload ? {
+		...(cfg.type === 'inline' ? {
+			"dialer-proxy": dialerproxy[cfg['.name']]?.detour,
 			payload: trim(cfg.payload)
 		} : {
-			path: HM_DIR + '/provider/' + cfg['.name']
-		}),
-		url: cfg.url,
-		"size-limit": bytesizeToByte(cfg.size_limit) || null,
-		interval: (cfg.type === 'http') ? durationToSecond(cfg.interval) ?? 86400 : null,
-		proxy: get_proxygroup(cfg.proxy),
-		header: cfg.header ? json(cfg.header) : null,
-		"health-check": {},
-		override: {},
-		filter: parse_filter(cfg.filter),
-		"exclude-filter": parse_filter(cfg.exclude_filter),
-		"exclude-type": parse_filter(cfg.exclude_type)
+			path: HM_DIR + '/provider/' + cfg['.name'],
+			url: cfg.url,
+			"size-limit": bytesizeToByte(cfg.size_limit) || null,
+			interval: (cfg.type === 'http') ? durationToSecond(cfg.interval) ?? 86400 : null,
+			proxy: get_proxygroup(cfg.proxy),
+			header: cfg.header ? json(cfg.header) : null,
+			/* Health fields */
+			"health-check": cfg.health_enable === '0' ? {enable: false} : {
+				enable: true,
+				url: cfg.health_url,
+				interval: durationToSecond(cfg.health_interval) ?? 600,
+				timeout: strToInt(cfg.health_timeout) || 5000,
+				lazy: (cfg.health_lazy === '0') ? false : null,
+				"expected-status": cfg.health_expected_status || '204'
+			},
+			/* Override fields */
+			override: {
+				"additional-prefix": cfg.override_prefix,
+				"additional-suffix": cfg.override_suffix,
+				"proxy-name": isEmpty(cfg.override_replace) ? null : map(cfg.override_replace, (obj) => json(obj)),
+				// Configuration Items
+				tfo: strToBool(cfg.override_tfo),
+				mptcp: strToBool(cfg.override_mptcp),
+				udp: (cfg.override_udp === '0') ? false : true,
+				"udp-over-tcp": strToBool(cfg.override_uot),
+				up: cfg.override_up ? cfg.override_up + ' Mbps' : null,
+				down: cfg.override_down ? cfg.override_down + ' Mbps' : null,
+				"skip-cert-verify": strToBool(cfg.override_skip_cert_verify) || false,
+				"dialer-proxy": dialerproxy[cfg['.name']]?.detour,
+				"interface-name": cfg.override_interface_name,
+				"routing-mark": strToInt(cfg.override_routing_mark) || null,
+				"ip-version": cfg.override_ip_version
+			},
+			/* General fields */
+			filter: parse_filter(cfg.filter),
+			"exclude-filter": parse_filter(cfg.exclude_filter),
+			"exclude-type": parse_filter(cfg.exclude_type)
+		})
 	};
-
-	/* Override fields */
-	config["proxy-providers"][cfg['.name']].override = {
-		"additional-prefix": cfg.override_prefix,
-		"additional-suffix": cfg.override_suffix,
-		"proxy-name": isEmpty(cfg.override_replace) ? null : map(cfg.override_replace, (obj) => json(obj)),
-		// Configuration Items
-		tfo: strToBool(cfg.override_tfo),
-		mptcp: strToBool(cfg.override_mptcp),
-		udp: (cfg.override_udp === '0') ? false : true,
-		"udp-over-tcp": strToBool(cfg.override_uot),
-		up: cfg.override_up ? cfg.override_up + ' Mbps' : null,
-		down: cfg.override_down ? cfg.override_down + ' Mbps' : null,
-		"skip-cert-verify": strToBool(cfg.override_skip_cert_verify) || false,
-		"dialer-proxy": dialerproxy[cfg['.name']]?.detour,
-		"interface-name": cfg.override_interface_name,
-		"routing-mark": strToInt(cfg.override_routing_mark) || null,
-		"ip-version": cfg.override_ip_version
-	};
-
-	/* Health fields */
-	if (cfg.health_enable === '0') {
-		config["proxy-providers"][cfg['.name']]["health-check"] = null;
-	} else {
-		config["proxy-providers"][cfg['.name']]["health-check"] = {
-			enable: true,
-			url: cfg.health_url,
-			interval: durationToSecond(cfg.health_interval) ?? 600,
-			timeout: strToInt(cfg.health_timeout) || 5000,
-			lazy: (cfg.health_lazy === '0') ? false : null,
-			"expected-status": cfg.health_expected_status || '204'
-		};
-	}
 });
 /* Provider END */
 
@@ -737,15 +742,15 @@ uci.foreach(uciconf, ucirule, (cfg) => {
 		type: cfg.type,
 		format: cfg.format,
 		behavior: cfg.behavior,
-		...(cfg.payload ? {
+		...(cfg.type === 'inline' ? {
 			payload: trim(cfg.payload)
 		} : {
-			path: HM_DIR + '/ruleset/' + cfg['.name']
-		}),
-		url: cfg.url,
-		"size-limit": bytesizeToByte(cfg.size_limit) || null,
-		interval: (cfg.type === 'http') ? durationToSecond(cfg.interval) ?? 259200 : null,
-		proxy: get_proxygroup(cfg.proxy)
+			path: HM_DIR + '/ruleset/' + cfg['.name'],
+			url: cfg.url,
+			"size-limit": bytesizeToByte(cfg.size_limit) || null,
+			interval: (cfg.type === 'http') ? durationToSecond(cfg.interval) ?? 259200 : null,
+			proxy: get_proxygroup(cfg.proxy)
+		})
 	};
 });
 /* Rule set END */
@@ -776,8 +781,5 @@ uci.foreach(uciconf, ucisubro, (cfg) => {
 	push(config["sub-rules"][cfg.group], parse_entry(cfg.entry));
 });
 /* Sub rules END */
-
-/* Debug dialer-proxy */
-//config.dialerproxy = dialerproxy;
 
 printf('%.J\n', removeBlankAttrs(config));

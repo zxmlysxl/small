@@ -168,9 +168,9 @@ return view.extend({
 			return E('strong', [features.core_version || _('Unknown')]);
 		}
 
-		so = ss.option(form.DummyValue, '_luciapp_version', _('Application version'));
+		so = ss.option(form.DummyValue, '_app_version', _('Application version'));
 		so.cfgvalue = function() {
-			return E('strong', [features.luciapp_version || _('Unknown')]);
+			return E('strong', [features.app_version || _('Unknown')]);
 		}
 
 		so = ss.option(form.DummyValue, '_client_status', _('Client status'));
@@ -231,9 +231,9 @@ return view.extend({
 			so.value.apply(so, res);
 		})
 		so.rmempty = false;
-		if (!features.hm_has_stunclient) {
-			so.description = _('To check NAT Behavior you need to install <a href="%s"><b>stuntman-client</b></a> first')
-				.format('https://github.com/muink/openwrt-stuntman');
+		if (!features.has_stunclient) {
+			so.description = _('To check NAT Behavior you need to install <a href="%s"><b>%s</b></a> first')
+				.format(L.url('admin/system/package-manager') + '?query=stuntman-client', 'stuntman-client');
 			so.readonly = true;
 		} else {
 			so.renderWidget = function(section_id, option_index, cfgvalue) {
@@ -475,9 +475,9 @@ return view.extend({
 
 		so = ss.option(form.ListValue, 'proxy_mode', _('Proxy mode'));
 		so.value('redir', _('Redirect TCP'));
-		if (features.hm_has_tproxy)
+		if (features.has_tproxy)
 			so.value('redir_tproxy', _('Redirect TCP + TProxy UDP'));
-		if (features.hm_has_ip_full && features.hm_has_tun) {
+		if (features.has_ip_full && features.has_tun) {
 			so.value('redir_tun', _('Redirect TCP + Tun UDP'));
 			so.value('tun', _('Tun TCP/UDP'));
 		} else
@@ -521,6 +521,7 @@ return view.extend({
 		so.placeholder = '65536';
 
 		so = ss.option(form.Value, 'tun_udp_timeout', _('UDP NAT expiration time'),
+			_('Aging time of NAT map maintained by client.</br>') +
 			_('In seconds. <code>%s</code> will be used if empty.').format('300'));
 		so.placeholder = '300';
 		so.validate = L.bind(hm.validateTimeDuration, so);
@@ -756,7 +757,7 @@ return view.extend({
 			_('Specify target ports to be proxied. Multiple ports must be separated by commas.'));
 		so.create = true;
 		hm.routing_port_type.forEach((res) => {
-			if (res[0] !== 'common_udpport')
+			if (!res[0].match(/_udpport$/))
 				so.value.apply(so, res);
 		})
 		so.validate = L.bind(hm.validateCommonPort, so);
@@ -765,7 +766,7 @@ return view.extend({
 			_('Specify target ports to be proxied. Multiple ports must be separated by commas.'));
 		so.create = true;
 		hm.routing_port_type.forEach((res) => {
-			if (res[0] !== 'common_tcpport')
+			if (!res[0].match(/_tcpport$/))
 				so.value.apply(so, res);
 		})
 		so.validate = L.bind(hm.validateCommonPort, so);
@@ -777,9 +778,11 @@ return view.extend({
 		so.value('routing_gfw', _('Routing GFW'));
 
 		so = ss.taboption('routing_control', form.Flag, 'routing_domain', _('Handle domain'),
-			_('Routing mode will be handle domain.'));
+			_('Routing mode will be handle domain.') + '</br>' +
+			_('Please ensure that the DNS query of the domains to be processed in the DNS policy</br>' +
+				'are send via DIRECT/Proxy Node in the same semantics as Routing mode.'));
 		so.default = so.disabled;
-		if (!features.hm_has_dnsmasq_full) {
+		if (!features.has_dnsmasq_full) {
 			so.description = _('To enable, you need to install <code>dnsmasq-full</code>.');
 			so.readonly = true;
 			uci.set(data[0], so.section.section, so.option, '');
